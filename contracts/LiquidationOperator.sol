@@ -138,6 +138,18 @@ contract LiquidationOperator is IUniswapV2Callee {
     // TODO: define constants used in the contract including ERC-20 tokens, Uniswap Pairs, Aave lending pools, etc. */
     //    *** Your code here ***
     // END TODO
+    address constant target = 0x59CE4a2AC5bC3f5F225439B2993b86B42f6d3e9F;
+    address me = address(this);
+    address constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7; 
+    address constant WBTC = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
+    address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    ILendingPool constant lending_pool = ILendingPool(0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9);
+    IUniswapV2Factory constant factory = IUniswapV2Factory(0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f);
+    IUniswapV2Pair weth_usdt = IUniswapV2Pair(factory.getPair(WETH, USDT));
+    IUniswapV2Pair wbtc_weth = IUniswapV2Pair(factory.getPair(WETH, WBTC));
+    IERC20 constant usdt_pool = IERC20(USDT);
+    IERC20 constant wbtc_pool = IERC20(WBTC);
+    IERC20 constant weth_pool = IERC20(WETH);
 
     // some helper function, it is totally fine if you can finish the lab without using these function
     // https://github.com/Uniswap/v2-periphery/blob/master/contracts/libraries/UniswapV2Library.sol
@@ -185,6 +197,9 @@ contract LiquidationOperator is IUniswapV2Callee {
 
     // TODO: add a `receive` function so that you can withdraw your WETH
     //   *** Your code here ***
+    receive() external payable {
+
+}
     // END TODO
 
     // required by the testing script, entry for your liquidation call
@@ -193,9 +208,12 @@ contract LiquidationOperator is IUniswapV2Callee {
 
         // 0. security checks and initializing variables
         //    *** Your code here ***
+        uint256 health_factor;
+        uint256 usdt_amount = 2916378221684;
 
         // 1. get the target user account data & make sure it is liquidatable
-        //    *** Your code here ***
+        (,,,,,health_factor) = lending_pool.getUserAccountData(target);
+        require(health_factor < (10**health_factor_decimals), "Health Factor Too High");
 
         // 2. call flash swap to liquidate the target user
         // based on https://etherscan.io/tx/0xac7df37a43fab1b130318bbb761861b8357650db2e2c6493b73d6da3d9581077
@@ -203,9 +221,12 @@ contract LiquidationOperator is IUniswapV2Callee {
         // we should borrow USDT, liquidate the target user and get the WBTC, then swap WBTC to repay uniswap
         // (please feel free to develop other workflows as long as they liquidate the target user successfully)
         //    *** Your code here ***
+        
 
         // 3. Convert the profit into ETH and send back to sender
         //    *** Your code here ***
+        uint256 my_eth = IERC20(WETH).balanceOf(me); 
+        IWETH(WETH).withdraw(my_eth);
 
         // END TODO
     }
@@ -221,15 +242,32 @@ contract LiquidationOperator is IUniswapV2Callee {
 
         // 2.0. security checks and initializing variables
         //    *** Your code here ***
+        uint256 wbtc_amount;
+        uint112 res_in;
+        uint112 res_out;
+        uint256 raw_amount;
+        uint256 repay_amount;
 
         // 2.1 liquidate the target user
         //    *** Your code here ***
+        (res_in, res_out,) = weth_usdt.getReserves();
+        raw_amount = getAmountOut(amount1, res_in, res_out);
+        weth_usdt.swap(0, amount1, me, abi.encode("flash loan"));
+        usdt_pool.approve(address(lending_pool), amount1);
+        lending_pool.liquidationCall(WBTC, USDT, target, amount1, false);
 
         // 2.2 swap WBTC for other things or repay directly
         //    *** Your code here ***
+        wbtc_amount = wbtc_pool.balanceOf(me);
+        wbtc_pool.approve(address(wbtc_weth), wbtc_amount);
+        wbtc_weth.swap(wbtc_amount, 0, me, "");
 
         // 2.3 repay
         //    *** Your code here ***
+        (res_in, res_out,) = weth_usdt.getReserves();
+        repay_amount = getAmountIn(raw_amount, res_in, res_out);
+        weth_pool.approve(address(weth_usdt), repay_amount);
+        weth_usdt.swap(repay_amount, 0, me, "");
         
         // END TODO
     }

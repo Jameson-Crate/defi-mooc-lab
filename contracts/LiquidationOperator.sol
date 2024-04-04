@@ -197,9 +197,11 @@ contract LiquidationOperator is IUniswapV2Callee {
 
     // TODO: add a `receive` function so that you can withdraw your WETH
     //   *** Your code here ***
-    receive() external payable {
+    event Received(address, uint);
 
-}
+    receive() external payable {
+        emit Received(msg.sender, msg.value);
+    }
     // END TODO
 
     // required by the testing script, entry for your liquidation call
@@ -221,13 +223,13 @@ contract LiquidationOperator is IUniswapV2Callee {
         // we should borrow USDT, liquidate the target user and get the WBTC, then swap WBTC to repay uniswap
         // (please feel free to develop other workflows as long as they liquidate the target user successfully)
         //    *** Your code here ***
-        
+        weth_usdt.swap(0, usdt_amount, me, abi.encode("flash loan"));
 
         // 3. Convert the profit into ETH and send back to sender
         //    *** Your code here ***
         uint256 my_eth = IERC20(WETH).balanceOf(me); 
         IWETH(WETH).withdraw(my_eth);
-
+        payable(msg.sender).transfer(me.balance);
         // END TODO
     }
 
@@ -235,7 +237,7 @@ contract LiquidationOperator is IUniswapV2Callee {
     function uniswapV2Call(
         address,
         uint256,
-        uint256 amount1,
+        uint256 amount_usdt,
         bytes calldata
     ) external override {
         // TODO: implement your liquidation logic
@@ -243,31 +245,32 @@ contract LiquidationOperator is IUniswapV2Callee {
         // 2.0. security checks and initializing variables
         //    *** Your code here ***
         uint256 wbtc_amount;
-        uint112 res_in;
-        uint112 res_out;
-        uint256 raw_amount;
-        uint256 repay_amount;
+        uint256 weth_amount;
+        uint112 res_wbtc;
+        uint112 res_weth;
+        uint112 res_usdt;
+        uint256 repay_weth;
 
         // 2.1 liquidate the target user
         //    *** Your code here ***
-        (res_in, res_out,) = weth_usdt.getReserves();
-        raw_amount = getAmountOut(amount1, res_in, res_out);
-        weth_usdt.swap(0, amount1, me, abi.encode("flash loan"));
-        usdt_pool.approve(address(lending_pool), amount1);
-        lending_pool.liquidationCall(WBTC, USDT, target, amount1, false);
+        usdt_pool.approve(address(lending_pool), amount_usdt);
+        lending_pool.liquidationCall(WBTC, USDT, target, amount_usdt, false);
 
         // 2.2 swap WBTC for other things or repay directly
         //    *** Your code here ***
         wbtc_amount = wbtc_pool.balanceOf(me);
+        (res_wbtc, res_weth,) = wbtc_weth.getReserves();
+        wbtc_pool.transfer(address(wbtc_weth), wbtc_amount);
+        weth_amount = getAmountOut(wbtc_amount, res_wbtc, res_weth);
         wbtc_pool.approve(address(wbtc_weth), wbtc_amount);
-        wbtc_weth.swap(wbtc_amount, 0, me, "");
+        wbtc_weth.swap(0, weth_amount, me, "");
 
         // 2.3 repay
         //    *** Your code here ***
-        (res_in, res_out,) = weth_usdt.getReserves();
-        repay_amount = getAmountIn(raw_amount, res_in, res_out);
-        weth_pool.approve(address(weth_usdt), repay_amount);
-        weth_usdt.swap(repay_amount, 0, me, "");
+        (res_weth, res_usdt,) = weth_usdt.getReserves();
+        repay_weth = getAmountIn(amount_usdt, res_weth, res_usdt);
+        weth_pool.approve(address(weth_usdt), repay_weth);
+        weth_pool.transfer(address(weth_usdt), repay_weth);
         
         // END TODO
     }
